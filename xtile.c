@@ -34,6 +34,7 @@ static void cleanup(void);
 static void checkconflicts(void);
 static void addclient(Window w);
 static void removeclient(Window w);
+static void scan(void);
 static struct Client *getclient(Window w);
 
 static struct Client *getclient(Window w) {
@@ -87,6 +88,27 @@ static void addclient(Window w) {
   c->win = w;
   c->next = clients;
   clients = c;
+}
+
+static void scan(void) {
+  Window root, parent, *wins;
+  unsigned int nwins;
+
+  if (XQueryTree(x.dpy, x.root, &root, &parent, &wins, &nwins)) {
+    for (unsigned int i = 0; i < nwins; i++) {
+      XWindowAttributes wa;
+
+      if (!XGetWindowAttributes(x.dpy, wins[i], &wa) || wa.override_redirect ||
+          wa.map_state != IsViewable)
+        continue;
+
+      if (!getclient(wins[i]))
+        addclient(wins[i]);
+    }
+
+    if (wins)
+      XFree(wins);
+  }
 }
 
 static void removeclient(Window w) {
@@ -182,6 +204,7 @@ int main(int argc, char **argv) {
 
   setup();
   checkconflicts();
+  scan();
 
 #ifdef __OpenBSD__
   if (pledge("stdio rpath proc", NULL) == -1)
