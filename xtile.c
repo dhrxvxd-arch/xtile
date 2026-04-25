@@ -117,6 +117,10 @@ static void run(void) {
 
     case MapRequest: {
       XMapRequestEvent *ev = &e.xmaprequest;
+      XWindowAttributes wa;
+
+      if (!XGetWindowAttributes(x.dpy, ev->window, &wa) || wa.override_redirect)
+        break;
       if (!getclient(ev->window))
         addclient(ev->window);
       XMapWindow(x.dpy, ev->window);
