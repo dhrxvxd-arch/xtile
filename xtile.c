@@ -132,6 +132,10 @@ static void run(void) {
       removeclient(e.xdestroywindow.window);
     } break;
 
+    case UnmapNotify: {
+      removeclient(e.xunmap.window);
+    } break;
+
     default:
       break;
     }
