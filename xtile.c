@@ -34,6 +34,14 @@ static void cleanup(void);
 static void checkconflicts(void);
 static void addclient(Window w);
 static void removeclient(Window w);
+static struct Client *getclient(Window w);
+
+static struct Client *getclient(Window w) {
+  for (struct Client *c = clients; c; c = c->next)
+    if (c->win == w)
+      return c;
+  return NULL;
+}
 
 static void initlocale(void) {
   if (!setlocale(LC_CTYPE, "")) {
@@ -109,7 +117,8 @@ static void run(void) {
 
     case MapRequest: {
       XMapRequestEvent *ev = &e.xmaprequest;
-      addclient(ev->window);
+      if (!getclient(ev->window))
+        addclient(ev->window);
       XMapWindow(x.dpy, ev->window);
     }; break;
 
