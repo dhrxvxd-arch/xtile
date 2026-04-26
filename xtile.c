@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "util.h"
+#include <util.h>
 
 #define VERSION "0.1.0"
 

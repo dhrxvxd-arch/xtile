@@ -1,6 +1,6 @@
 PREFIX ?= /usr/local
 CC ?= clang
-CFLAGS ?= -Os --std=c23 -Wall -Wextra -Wpedantic -Wno-deprecated-declarations -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_XOPEN_SOURCE=700L -DVERSION=\"0.1.0\"
+CFLAGS ?= -Os --std=c23 -Wall -Wextra -Wpedantic -Wno-deprecated-declarations -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_XOPEN_SOURCE=700L -DVERSION=\"0.1.0\" -I.
 LDFLAGS ?= -lX11
 
 SRC = util.c xtile.c
