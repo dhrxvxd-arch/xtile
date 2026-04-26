@@ -12,7 +12,7 @@
 #include <unistd.h>
 
 #define VERSION "0.1.0"
-#define MODMASK Mod1Mask
+#define MODMASK Mod4Mask
 #define LENGTH(X) (sizeof(x) / sizeof((X)[0]))
 
 #if defined(__GNUC__) || defined(__clang__)
