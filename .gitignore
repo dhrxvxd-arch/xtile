@@ -1,3 +1,5 @@
-*.o
-debug/
-build/
+*
+!*/
+!*.c
+!README.md
+!.gitignore

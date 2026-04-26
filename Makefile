@@ -1,11 +1,10 @@
 PREFIX ?= /usr/local
 CC ?= cc
-BUILD ?= ./build
 
 CFLAGS ?= -std=c23 -Wall -Wextra -Wpedantic \
 	-Wno-deprecated-declarations \
 	-D_DEFAULT_SOURCE -D_BSD_SOURCE -D_XOPEN_SOURCE=700L \
-	-DVERSION=\"0.1.0\"
+	-DVERSION=\"0.1.0\" -I.
 
 LDFLAGS ?= -lX11
 
@@ -15,10 +14,10 @@ OBJ = $(SRC:.c=.o)
 all: xtile
 
 xtile: $(OBJ)
-	$(CC) $(OBJ) -o $(BUILD)/$@ $(LDFLAGS)
+	$(CC) $(OBJ) -o $@ $(LDFLAGS)
 
 %.o: %.c
-	$(CC) $(CFLAGS) -c $< -o $(BUILD)/$@
+	$(CC) $(CFLAGS) -c $< -o $@
 
 install: xtile
 	mkdir -p $(PREFIX)/bin
@@ -32,6 +31,6 @@ clean:
 	rm -f xtile $(OBJ)
 
 run:
-	startx ./debug/xinitrc
+	startx ./xinitrc
 
 .PHONY: all clean install uninstall run
