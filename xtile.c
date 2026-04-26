@@ -62,7 +62,6 @@ static struct XContext x;
 static struct Client *clients;
 static struct Client *sel;
 static struct Dimensions dim;
-static struct KeyGr keys[];
 static volatile sig_atomic_t running = 1;
 
 _Noreturn void die(const char *fmt, ...) PRINTF_FMT(1, 2);
