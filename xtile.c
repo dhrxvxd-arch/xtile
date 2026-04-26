@@ -423,7 +423,6 @@ static void arrange(void) {
   if (!clients)
     return;
 
-  /* map/unmap based on visibility */
   for (c = clients; c; c = c->next) {
     if (ISVISIBLE(c))
       XMapWindow(x.dpy, c->win);
@@ -431,7 +430,6 @@ static void arrange(void) {
       XUnmapWindow(x.dpy, c->win);
   }
 
-  /* count visible */
   n = 0;
   for (c = clients; c; c = c->next)
     if (ISVISIBLE(c))
@@ -443,7 +441,6 @@ static void arrange(void) {
   master_w = (n > 1) ? (dim.width * 3 / 5) : dim.width;
   stack_w = dim.width - master_w;
 
-  /* first visible = master */
   for (c = clients; c && !ISVISIBLE(c); c = c->next)
     ;
 
