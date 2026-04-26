@@ -5,12 +5,13 @@ STRIP ?= strip
 CFLAGS ?= -std=c23 -Wall -Wextra -Wpedantic \
 	-Wno-deprecated-declarations \
 	-D_DEFAULT_SOURCE -D_BSD_SOURCE -D_XOPEN_SOURCE=700L \
-	-DVERSION=\"0.1.0\" -I. \
+	-DVERSION=\"0.1.0\" \
 	-O2 -march=native -flto \
 	-ffunction-sections -fdata-sections \
 	-fno-asynchronous-unwind-tables \
 	-fno-unwind-tables \
-	-fno-stack-protector
+	-fno-stack-protector \
+	-fvisibility=hidden -static
 
 LDFLAGS ?= -lX11 \
 	-flto \
