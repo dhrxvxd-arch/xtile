@@ -1,6 +1,11 @@
 PREFIX ?= /usr/local
-CC ?= clang
-CFLAGS ?= -Os --std=c23 -Wall -Wextra -Wpedantic -Wno-deprecated-declarations -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_XOPEN_SOURCE=700L -DVERSION=\"0.1.0\" -I.
+CC ?= cc
+
+CFLAGS ?= -std=c23 -Wall -Wextra -Wpedantic \
+	-Wno-deprecated-declarations \
+	-D_DEFAULT_SOURCE -D_BSD_SOURCE -D_XOPEN_SOURCE=700L \
+	-DVERSION=\"0.1.0\" -I.
+
 LDFLAGS ?= -lX11
 
 SRC = util.c xtile.c
@@ -8,16 +13,22 @@ OBJ = $(SRC:.c=.o)
 
 all: xtile
 
+config.h:
+	cp config.def.h config.h
+
 xtile: $(OBJ)
 	$(CC) $(OBJ) -o $@ $(LDFLAGS)
 
 %.o: %.c
-	$(CC) $(CFLAGS) -I./ -c $< -o $@
+	$(CC) $(CFLAGS) -c $< -o $@
 
 install: xtile
 	mkdir -p $(PREFIX)/bin
 	cp xtile $(PREFIX)/bin/xtile
 	chmod 755 $(PREFIX)/bin/xtile
+
+uninstall:
+	rm -f $(PREFIX)/bin/xtile
 
 clean:
 	rm -f xtile $(OBJ)
@@ -25,4 +36,4 @@ clean:
 run:
 	startx debug/xinitrc
 
-.PHONY: all clean install run
+.PHONY: all clean install uninstall run

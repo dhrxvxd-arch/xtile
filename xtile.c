@@ -7,7 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <util.h>
+#include "config.h"
+#include "util.h"
 
 #define VERSION "0.1.0"
 
@@ -23,8 +24,15 @@ struct Client {
   struct Client *next;
 };
 
+struct Dimensions {
+  int width;
+  int height;
+};
+
 static struct XContext x;
 static struct Client *clients = NULL;
+static struct Client *sel = NULL;
+static struct Dimensions dim;
 static volatile sig_atomic_t running = 1;
 
 static void initlocale(void);
@@ -32,8 +40,10 @@ static void setup(void);
 static void run(void);
 static void cleanup(void);
 static void checkconflicts(void);
+static void focus(struct Client *c);
 static void addclient(Window w);
 static void removeclient(Window w);
+static void arrange(void);
 static void scan(void);
 static struct Client *getclient(Window w);
 
@@ -68,12 +78,16 @@ static void setup(void) {
 
   x.cursor = XCreateFontCursor(x.dpy, XC_left_ptr);
   XDefineCursor(x.dpy, x.root, x.cursor);
+
+  dim.width = DisplayWidth(x.dpy, x.screen);
+  dim.height = DisplayHeight(x.dpy, x.screen);
 }
 
 static void checkconflicts(void) {
   XSetErrorHandler(xerrorstart);
   XSelectInput(x.dpy, x.root,
-               SubstructureRedirectMask | SubstructureNotifyMask);
+               SubstructureRedirectMask | SubstructureNotifyMask |
+                   ButtonPressMask | PointerMotionMask);
   XSync(x.dpy, False);
   XSetErrorHandler(NULL);
 }
@@ -83,11 +97,24 @@ static void handle_signal(int sig) {
   running = 0;
 }
 
+static void focus(struct Client *c) {
+  if (!c)
+    return;
+  sel = c;
+  XSetInputFocus(x.dpy, c->win, RevertToPointerRoot, CurrentTime);
+
+  for (struct Client *it = clients; it; it = it->next)
+    XSetWindowBorder(x.dpy, it->win, (it == sel) ? 0xff0000 : 0x222222);
+  XRaiseWindow(x.dpy, c->win);
+}
+
 static void addclient(Window w) {
   struct Client *c = ecalloc(1, sizeof(struct Client));
   c->win = w;
   c->next = clients;
   clients = c;
+  XSetWindowBorderWidth(x.dpy, c->win, borderwidth);
+  XSelectInput(x.dpy, w, EnterWindowMask | FocusChangeMask);
 }
 
 static void scan(void) {
@@ -113,15 +140,41 @@ static void scan(void) {
 
 static void removeclient(Window w) {
   struct Client **tc = &clients;
-
   while (*tc) {
     if ((*tc)->win == w) {
       struct Client *tmp = *tc;
       *tc = (*tc)->next;
+
+      if (sel == tmp)
+        sel = clients;
+
       free(tmp);
-      return;
+      break;
     }
     tc = &(*tc)->next;
+  }
+  if (clients)
+    focus(clients);
+  else
+    sel = NULL;
+}
+
+static void arrange(void) {
+  int n = 0;
+  for (struct Client *c = clients; c; c = c->next)
+    n++;
+
+  if (!n)
+    return;
+
+  int i = 0;
+  for (struct Client *c = clients; c; c = c->next) {
+    int wx = (i % 2) * (dim.width / 2);
+    int wy = (i / 2) * (dim.height / (n / 2 + 1));
+
+    XMoveResizeWindow(x.dpy, c->win, wx, wy, dim.width / 2,
+                      dim.height / (n / 2 + 1));
+    i++;
   }
 }
 
@@ -134,6 +187,13 @@ static void run(void) {
     switch (e.type) {
 
     case ButtonPress: {
+      XButtonEvent *ev = &e.xbutton;
+      struct Client *c = getclient(ev->window);
+      if (c) {
+        focus(c);
+        XSync(x.dpy, False);
+      }
+
       XAllowEvents(x.dpy, ReplayPointer, CurrentTime);
     }; break;
 
@@ -146,29 +206,45 @@ static void run(void) {
       if (!getclient(ev->window))
         addclient(ev->window);
       XMapWindow(x.dpy, ev->window);
+      focus(getclient(ev->window));
+      arrange();
+      XSync(x.dpy, False);
     }; break;
 
     case ConfigureRequest: {
       XConfigureRequestEvent *ev = &e.xconfigurerequest;
 
-      XWindowChanges wc;
-      wc.x = ev->x;
-      wc.y = ev->y;
-      wc.width = ev->width;
-      wc.height = ev->height;
-      wc.border_width = ev->border_width;
-      wc.sibling = ev->above;
-      wc.stack_mode = ev->detail;
+      if (getclient(ev->window)) {
+        XWindowChanges wc;
+        wc.border_width = ev->border_width;
+        wc.sibling = ev->above;
+        wc.stack_mode = ev->detail;
 
-      XConfigureWindow(x.dpy, ev->window, ev->value_mask, &wc);
+        XConfigureWindow(
+            x.dpy, ev->window,
+            ev->value_mask & (CWBorderWidth | CWSibling | CWStackMode), &wc);
+      } else {
+        XWindowChanges wc;
+        wc.x = ev->x;
+        wc.y = ev->y;
+        wc.width = ev->width;
+        wc.height = ev->height;
+        wc.border_width = ev->border_width;
+        wc.sibling = ev->above;
+        wc.stack_mode = ev->detail;
+
+        XConfigureWindow(x.dpy, ev->window, ev->value_mask, &wc);
+      }
     }; break;
 
     case DestroyNotify: {
       removeclient(e.xdestroywindow.window);
+      arrange();
     } break;
 
     case UnmapNotify: {
       removeclient(e.xunmap.window);
+      arrange();
     } break;
 
     default:
@@ -205,6 +281,9 @@ int main(int argc, char **argv) {
   setup();
   checkconflicts();
   scan();
+  if (clients)
+    focus(clients);
+  arrange();
 
 #ifdef __OpenBSD__
   if (pledge("stdio rpath proc", NULL) == -1)
