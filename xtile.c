@@ -15,7 +15,10 @@
 #define VERSION "0.1.0"
 #define MODMASK Mod4Mask
 #define LENGTH(X) (sizeof(X) / sizeof((X)[0]))
-#define CLEANMASK(mask) ((mask) & ~(LockMask))
+#define CLEANMASK(mask)                                                        \
+  (mask & ~(numlockmask | LockMask) &                                          \
+   (ShiftMask | ControlMask | Mod1Mask | Mod2Mask | Mod3Mask | Mod4Mask |      \
+    Mod5Mask))
 
 #if defined(__GNUC__) || defined(__clang__)
 #define PRINTF_FMT(a, b) __attribute__((format(printf, a, b)))
@@ -55,14 +58,28 @@ struct KeyGr {
   const union Key key;
 };
 
+enum { SchemeNorm, SchemeSel };
+enum { CurNormal, CurResize, CurMove, CurLast };
+
 static const unsigned short borderwidth = 2;
-static const char *termcmd[] = {"kitty", NULL};
+static unsigned long scheme[2][3];
+static const char *termcmd[] = {"st", NULL};
+static const char col_1[] = "#222222";
+static const char col_2[] = "#444444";
+static const char col_3[] = "#bbbbbb";
+static const char col_4[] = "#eeeeee";
+static const char col_accent[] = "#005577";
+static const char *colors[][3] = {
+    [SchemeNorm] = {col_3, col_1, col_2},
+    [SchemeSel] = {col_4, col_accent, col_accent},
+};
 
 static struct XContext x;
 static struct Client *clients;
 static struct Client *sel;
 static struct Dimensions dim;
 static volatile sig_atomic_t running = 1;
+static unsigned int numlockmask;
 
 _Noreturn void die(const char *fmt, ...) PRINTF_FMT(1, 2);
 void *ecalloc(size_t nmemb, size_t size);
@@ -76,6 +93,8 @@ static void focus(struct Client *c);
 static void addclient(Window w);
 static void spawn(const union Key *key);
 static void killclient(const union Key *k);
+static unsigned long getcolor(const char *col);
+static void updatenumlockmask(void);
 static void quit(const union Key *k);
 static void focusnext(const union Key *k);
 static void removeclient(Window w);
@@ -113,6 +132,35 @@ void *ecalloc(size_t nmemb, size_t size) {
   if (!p)
     die("calloc:");
   return p;
+}
+
+static void updatenumlockmask(void) {
+  XModifierKeymap *modmap;
+  KeyCode numlock;
+
+  numlockmask = 0;
+  modmap = XGetModifierMapping(x.dpy);
+  numlock = XKeysymToKeycode(x.dpy, XK_Num_Lock);
+
+  for (int i = 0; i < 8; i++) {
+    for (int j = 0; j < modmap->max_keypermod; j++) {
+      if (modmap->modifiermap[i * modmap->max_keypermod + j] == numlock)
+        numlockmask = (1 << i);
+    }
+  }
+
+  XFreeModifiermap(modmap);
+}
+
+static unsigned long getcolor(const char *col) {
+  XColor color;
+  Colormap cmap;
+
+  cmap = DefaultColormap(x.dpy, x.screen);
+  if (!XAllocNamedColor(x.dpy, cmap, col, &color, &color))
+    die("cannot allocate color");
+
+  return color.pixel;
 }
 
 static void spawn(const union Key *key) {
@@ -211,6 +259,12 @@ static void setup(void) {
     XGrabKey(x.dpy, keys[i].keycode, keys[i].mod, x.root, True, GrabModeAsync,
              GrabModeAsync);
   }
+
+  updatenumlockmask();
+
+  for (size_t i = 0; i < LENGTH(colors); i++)
+    for (size_t j = 0; j < 3; j++)
+      scheme[i][j] = getcolor(colors[i][j]);
 }
 
 static void checkconflicts(void) {
@@ -228,7 +282,9 @@ static void handle_signal(int sig) {
 }
 
 static void focus(struct Client *c) {
-  struct Client *it;
+  struct Client *old;
+
+  old = sel;
 
   if (!c) {
     sel = NULL;
@@ -236,25 +292,31 @@ static void focus(struct Client *c) {
     return;
   }
 
+  if (c == old)
+    return;
+
   sel = c;
+
+  if (old)
+    XSetWindowBorder(x.dpy, old->win, scheme[SchemeNorm][2]);
+
+  XSetWindowBorder(x.dpy, c->win, scheme[SchemeSel][2]);
+
   XSetInputFocus(x.dpy, c->win, RevertToPointerRoot, CurrentTime);
-
-  for (it = clients; it; it = it->next)
-    XSetWindowBorder(x.dpy, it->win, (it == sel) ? 0xff0000 : 0x222222);
-
   XRaiseWindow(x.dpy, c->win);
 }
 
 static void addclient(Window w) {
   struct Client *c;
 
-  c = ecalloc(1, sizeof(struct Client));
+  c = ecalloc(1, sizeof(*c));
   c->win = w;
   c->next = clients;
   clients = c;
 
   XSetWindowBorderWidth(x.dpy, c->win, borderwidth);
   XSelectInput(x.dpy, w, EnterWindowMask | FocusChangeMask);
+  XSetWindowBorder(x.dpy, c->win, scheme[SchemeNorm][2]);
 }
 
 static void scan(void) {
