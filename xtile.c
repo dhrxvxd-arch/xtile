@@ -2,6 +2,7 @@
 #include <X11/Xlib.h>
 #include <X11/cursorfont.h>
 #include <X11/keysym.h>
+
 #include <errno.h>
 #include <locale.h>
 #include <signal.h>
@@ -58,13 +59,14 @@ static const unsigned short borderwidth = 2;
 static const char *termcmd[] = {"kitty", NULL};
 
 static struct XContext x;
-static struct Client *clients = NULL;
-static struct Client *sel = NULL;
+static struct Client *clients;
+static struct Client *sel;
 static struct Dimensions dim;
 static volatile sig_atomic_t running = 1;
 
 _Noreturn void die(const char *fmt, ...) PRINTF_FMT(1, 2);
 void *ecalloc(size_t nmemb, size_t size);
+
 static void initlocale(void);
 static void setup(void);
 static void run(void);
@@ -90,39 +92,49 @@ static const struct KeyGr keys[] = {
 
 _Noreturn void die(const char *fmt, ...) {
   va_list ap;
-  int saved_errno = errno;
+  int saved_errno;
+
+  saved_errno = errno;
   va_start(ap, fmt);
   vfprintf(stderr, fmt, ap);
   va_end(ap);
-  size_t len = strlen(fmt);
-  if (len && fmt[len - 1] == ':')
+
+  if (fmt[0] && fmt[strlen(fmt) - 1] == ':')
     fprintf(stderr, " %s", strerror(saved_errno));
+
   fputc('\n', stderr);
-  fflush(stdout);
   exit(EXIT_FAILURE);
 }
 
 void *ecalloc(size_t nmemb, size_t size) {
-  void *p = calloc(nmemb, size);
+  void *p;
+
+  p = calloc(nmemb, size);
   if (!p)
     die("calloc:");
   return p;
 }
 
 static void spawn(const union Key *key) {
+  pid_t pid;
+  struct sigaction sa;
+  char **argv;
+
   if (!key || !key->v)
     return;
-  pid_t pid = fork();
+
+  pid = fork();
   if (pid == 0) {
     if (x.dpy)
       close(ConnectionNumber(x.dpy));
     setsid();
-    struct sigaction sa;
+
+    memset(&sa, 0, sizeof(sa));
     sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
     sa.sa_handler = SIG_DFL;
     sigaction(SIGCHLD, &sa, NULL);
-    char **argv = (char **)key->v;
+
+    argv = (char **)key->v;
     execvp(argv[0], argv);
     _exit(EXIT_FAILURE);
   } else if (pid < 0) {
@@ -132,15 +144,19 @@ static void spawn(const union Key *key) {
 
 static void killclient(const union Key *k) {
   (void)k;
+
   if (!sel)
     return;
+
   XKillClient(x.dpy, sel->win);
 }
 
 static void focusnext(const union Key *k) {
   (void)k;
+
   if (!sel || !clients)
     return;
+
   if (sel->next)
     focus(sel->next);
   else
@@ -153,9 +169,12 @@ static void quit(const union Key *k) {
 }
 
 static struct Client *getclient(Window w) {
-  for (struct Client *c = clients; c; c = c->next)
+  struct Client *c;
+
+  for (c = clients; c; c = c->next)
     if (c->win == w)
       return c;
+
   return NULL;
 }
 
@@ -171,20 +190,25 @@ static void initlocale(void) {
 static int xerrorstart(Display *dpy, XErrorEvent *ee) {
   (void)dpy;
   (void)ee;
+
   die("xtile: another window manager is already running");
   return -1;
 }
 
 static void setup(void) {
+  size_t i;
+  KeyCode code;
+
   x.screen = DefaultScreen(x.dpy);
   x.root = RootWindow(x.dpy, x.screen);
   x.cursor = XCreateFontCursor(x.dpy, XC_left_ptr);
   XDefineCursor(x.dpy, x.root, x.cursor);
+
   dim.width = DisplayWidth(x.dpy, x.screen);
   dim.height = DisplayHeight(x.dpy, x.screen);
 
-  for (size_t i = 0; i < LENGTH(keys); i++) {
-    KeyCode code = XKeysymToKeycode(x.dpy, keys[i].keysym);
+  for (i = 0; i < LENGTH(keys); i++) {
+    code = XKeysymToKeycode(x.dpy, keys[i].keysym);
     XGrabKey(x.dpy, code, keys[i].mod, x.root, True, GrabModeAsync,
              GrabModeAsync);
   }
@@ -205,30 +229,39 @@ static void handle_signal(int sig) {
 }
 
 static void focus(struct Client *c) {
+  struct Client *it;
+
   if (!c)
     return;
+
   sel = c;
   XSetInputFocus(x.dpy, c->win, RevertToPointerRoot, CurrentTime);
-  for (struct Client *it = clients; it; it = it->next)
+
+  for (it = clients; it; it = it->next)
     XSetWindowBorder(x.dpy, it->win, (it == sel) ? 0xff0000 : 0x222222);
+
   XRaiseWindow(x.dpy, c->win);
 }
 
 static void addclient(Window w) {
-  struct Client *c = ecalloc(1, sizeof(struct Client));
+  struct Client *c;
+
+  c = ecalloc(1, sizeof(struct Client));
   c->win = w;
   c->next = clients;
   clients = c;
+
   XSetWindowBorderWidth(x.dpy, c->win, borderwidth);
   XSelectInput(x.dpy, w, EnterWindowMask | FocusChangeMask);
 }
 
 static void scan(void) {
   Window root, parent, *wins;
-  unsigned int nwins;
+  unsigned int nwins, i;
+  XWindowAttributes wa;
+
   if (XQueryTree(x.dpy, x.root, &root, &parent, &wins, &nwins)) {
-    for (unsigned int i = 0; i < nwins; i++) {
-      XWindowAttributes wa;
+    for (i = 0; i < nwins; i++) {
       if (!XGetWindowAttributes(x.dpy, wins[i], &wa) || wa.override_redirect ||
           wa.map_state != IsViewable)
         continue;
@@ -241,10 +274,13 @@ static void scan(void) {
 }
 
 static void removeclient(Window w) {
-  struct Client **tc = &clients;
+  struct Client **tc;
+  struct Client *tmp;
+
+  tc = &clients;
   while (*tc) {
     if ((*tc)->win == w) {
-      struct Client *tmp = *tc;
+      tmp = *tc;
       *tc = (*tc)->next;
       if (sel == tmp)
         sel = clients;
@@ -253,104 +289,129 @@ static void removeclient(Window w) {
     }
     tc = &(*tc)->next;
   }
+
   if (sel)
     focus(sel);
 }
 
 static void arrange(void) {
+  struct Client *c;
+  int n, i, master_w, stack_w, stack_h, y, h;
+
   if (!clients)
     return;
-  int n = 0;
-  for (struct Client *c = clients; c; c = c->next)
+
+  n = 0;
+  for (c = clients; c; c = c->next)
     n++;
-  if (n == 0)
+
+  if (!n)
     return;
-  int master_w = (n > 1) ? (int)(dim.width * 0.6) : dim.width;
-  int stack_w = dim.width - master_w;
-  struct Client *c = clients;
+
+  master_w = (n > 1) ? (int)(dim.width * 0.6) : dim.width;
+  stack_w = dim.width - master_w;
+
+  c = clients;
   XMoveResizeWindow(x.dpy, c->win, 0, 0, master_w, dim.height);
+
   if (n == 1)
     return;
-  int stack_h = dim.height / (n - 1);
-  int i = 0;
+
+  stack_h = dim.height / (n - 1);
+  i = 0;
+
   for (c = c->next; c; c = c->next, i++) {
-    int y = i * stack_h;
-    int h = (i == n - 2) ? (dim.height - y) : stack_h;
+    y = i * stack_h;
+    h = (i == n - 2) ? (dim.height - y) : stack_h;
     XMoveResizeWindow(x.dpy, c->win, master_w, y, stack_w, h);
   }
 }
 
 static void run(void) {
   XEvent e;
+  XKeyEvent *kev;
+  XButtonEvent *bev;
+  XCrossingEvent *cev;
+  XMapRequestEvent *mrev;
+  XConfigureRequestEvent *crev;
+  XWindowAttributes wa;
+  XWindowChanges wc;
+  struct Client *c;
+  size_t i;
+
   while (running) {
     XNextEvent(x.dpy, &e);
+
     switch (e.type) {
     case ButtonPress: {
-      XButtonEvent *ev = &e.xbutton;
-      struct Client *c = getclient(ev->window);
+      bev = &e.xbutton;
+      c = getclient(bev->window);
       if (c) {
         focus(c);
         XSync(x.dpy, False);
       }
       XAllowEvents(x.dpy, ReplayPointer, CurrentTime);
     } break;
+
     case MapRequest: {
-      XMapRequestEvent *ev = &e.xmaprequest;
-      XWindowAttributes wa;
-      if (!XGetWindowAttributes(x.dpy, ev->window, &wa) || wa.override_redirect)
+      mrev = &e.xmaprequest;
+      if (!XGetWindowAttributes(x.dpy, mrev->window, &wa) ||
+          wa.override_redirect)
         break;
-      if (!getclient(ev->window))
-        addclient(ev->window);
-      XMapWindow(x.dpy, ev->window);
-      focus(getclient(ev->window));
+      if (!getclient(mrev->window))
+        addclient(mrev->window);
+      XMapWindow(x.dpy, mrev->window);
+      focus(getclient(mrev->window));
       arrange();
       XSync(x.dpy, False);
     } break;
+
     case ConfigureRequest: {
-      XConfigureRequestEvent *ev = &e.xconfigurerequest;
-      XWindowChanges wc;
-      if (getclient(ev->window)) {
-        wc.border_width = ev->border_width;
-        wc.sibling = ev->above;
-        wc.stack_mode = ev->detail;
+      crev = &e.xconfigurerequest;
+      if (getclient(crev->window)) {
+        wc.border_width = crev->border_width;
+        wc.sibling = crev->above;
+        wc.stack_mode = crev->detail;
         XConfigureWindow(
-            x.dpy, ev->window,
-            ev->value_mask & (CWBorderWidth | CWSibling | CWStackMode), &wc);
+            x.dpy, crev->window,
+            crev->value_mask & (CWBorderWidth | CWSibling | CWStackMode), &wc);
       } else {
-        wc.x = ev->x;
-        wc.y = ev->y;
-        wc.width = ev->width;
-        wc.height = ev->height;
-        wc.border_width = ev->border_width;
-        wc.sibling = ev->above;
-        wc.stack_mode = ev->detail;
-        XConfigureWindow(x.dpy, ev->window, ev->value_mask, &wc);
+        wc.x = crev->x;
+        wc.y = crev->y;
+        wc.width = crev->width;
+        wc.height = crev->height;
+        wc.border_width = crev->border_width;
+        wc.sibling = crev->above;
+        wc.stack_mode = crev->detail;
+        XConfigureWindow(x.dpy, crev->window, crev->value_mask, &wc);
       }
     } break;
-    case DestroyNotify:
+
+    case DestroyNotify: {
       removeclient(e.xdestroywindow.window);
       arrange();
-      break;
-    case UnmapNotify:
+    } break;
+
+    case UnmapNotify: {
       removeclient(e.xunmap.window);
       arrange();
-      break;
+    } break;
+
     case KeyPress: {
-      XKeyEvent *ev = &e.xkey;
-      for (size_t i = 0; i < LENGTH(keys); i++) {
-        if (ev->keycode == keys[i].keycode &&
-            CLEANMASK(ev->state) == CLEANMASK(keys[i].mod))
+      kev = &e.xkey;
+      for (i = 0; i < LENGTH(keys); i++) {
+        if (kev->keycode == keys[i].keycode &&
+            CLEANMASK(kev->state) == CLEANMASK(keys[i].mod))
           keys[i].func(&keys[i].key);
       }
     } break;
+
     case EnterNotify: {
-      XCrossingEvent *ev = &e.xcrossing;
-      struct Client *c = getclient(ev->window);
+      cev = &e.xcrossing;
+      c = getclient(cev->window);
       if (c && c != sel)
         focus(c);
     } break;
-    default:
-      break;
     }
   }
 }
@@ -376,22 +437,21 @@ int main(int argc, char **argv) {
 
   initlocale();
 
-  if (!(x.dpy = XOpenDisplay(NULL)))
+  x.dpy = XOpenDisplay(NULL);
+  if (!x.dpy)
     die("xtile: cannot open display");
 
   setup();
   checkconflicts();
   scan();
+
   if (clients)
     focus(clients);
-  arrange();
 
-#ifdef __OpenBSD__
-  if (pledge("stdio rpath proc", NULL) == -1)
-    die("pledge:");
-#endif
+  arrange();
 
   run();
   cleanup();
+
   return EXIT_SUCCESS;
 }
