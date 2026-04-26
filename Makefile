@@ -31,7 +31,7 @@ xtile: $(OBJ)
 
 install: xtile
 	mkdir -p $(PREFIX)/bin
-	cp xtile $(PREFIX)/bin/xtile
+	cp -f xtile $(PREFIX)/bin/xtile
 	$(STRIP) $(PREFIX)/bin/xtile
 	chmod 755 $(PREFIX)/bin/xtile
 
