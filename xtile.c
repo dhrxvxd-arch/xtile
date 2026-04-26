@@ -230,8 +230,11 @@ static void handle_signal(int sig) {
 static void focus(struct Client *c) {
   struct Client *it;
 
-  if (!c)
+  if (!c) {
+    sel = NULL;
+    XSetInputFocus(x.dpy, x.root, RevertToPointerRoot, CurrentTime);
     return;
+  }
 
   sel = c;
   XSetInputFocus(x.dpy, c->win, RevertToPointerRoot, CurrentTime);
@@ -291,6 +294,8 @@ static void removeclient(Window w) {
 
   if (sel)
     focus(sel);
+  else
+    XSetInputFocus(x.dpy, x.root, RevertToPointerRoot, CurrentTime);
 }
 
 static void arrange(void) {
@@ -387,11 +392,15 @@ static void run(void) {
     } break;
 
     case DestroyNotify: {
+      if (!getclient(e.xdestroywindow.window))
+        break;
       removeclient(e.xdestroywindow.window);
       arrange();
     } break;
 
     case UnmapNotify: {
+      if (!getclient(e.xunmap.window))
+        break;
       removeclient(e.xunmap.window);
       arrange();
     } break;
