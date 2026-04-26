@@ -19,7 +19,7 @@
   (mask & ~(numlockmask | LockMask) &                                          \
    (ShiftMask | ControlMask | Mod1Mask | Mod2Mask | Mod3Mask | Mod4Mask |      \
     Mod5Mask))
-
+#define ISVISIBLE(C) (C->tags & tagset)
 #if defined(__GNUC__) || defined(__clang__)
 #define PRINTF_FMT(a, b) __attribute__((format(printf, a, b)))
 #else
@@ -34,6 +34,7 @@ struct XContext {
 };
 
 struct Client {
+  unsigned int tags;
   Window win;
   struct Client *next;
 };
@@ -78,8 +79,9 @@ static struct XContext x;
 static struct Client *clients;
 static struct Client *sel;
 static struct Dimensions dim;
-static volatile sig_atomic_t running = 1;
 static unsigned int numlockmask;
+static volatile sig_atomic_t running = 1;
+static unsigned int tagset = 1;
 
 _Noreturn void die(const char *fmt, ...) PRINTF_FMT(1, 2);
 void *ecalloc(size_t nmemb, size_t size);
@@ -100,6 +102,8 @@ static void focusnext(const union Key *k);
 static void removeclient(Window w);
 static void arrange(void);
 static void scan(void);
+static void view(const union Key *k);
+static void tag(const union Key *k);
 static struct Client *getclient(Window w);
 
 static struct KeyGr keys[] = {
@@ -107,7 +111,47 @@ static struct KeyGr keys[] = {
     {MODMASK, XK_q, quit, {0}},
     {MODMASK, XK_w, killclient, {0}},
     {MODMASK, XK_j, focusnext, {0}},
+
+    {MODMASK, XK_1, view, {.ui = 1 << 0}},
+    {MODMASK, XK_2, view, {.ui = 1 << 1}},
+    {MODMASK, XK_3, view, {.ui = 1 << 2}},
+
+    {MODMASK | ShiftMask, XK_1, tag, {.ui = 1 << 0}},
+    {MODMASK | ShiftMask, XK_2, tag, {.ui = 1 << 1}},
+    {MODMASK | ShiftMask, XK_3, tag, {.ui = 1 << 2}},
 };
+
+static void view(const union Key *k) {
+  if (tagset == k->ui)
+    return;
+
+  tagset = k->ui;
+  arrange();
+
+  sel = NULL;
+  for (struct Client *c = clients; c; c = c->next) {
+    if (ISVISIBLE(c)) {
+      focus(c);
+      break;
+    }
+  }
+}
+
+static void tag(const union Key *k) {
+  if (!sel)
+    return;
+
+  sel->tags = k->ui;
+  arrange();
+
+  sel = NULL;
+  for (struct Client *c = clients; c; c = c->next) {
+    if (ISVISIBLE(c)) {
+      focus(c);
+      break;
+    }
+  }
+}
 
 _Noreturn void die(const char *fmt, ...) {
   va_list ap;
@@ -200,15 +244,26 @@ static void killclient(const union Key *k) {
 }
 
 static void focusnext(const union Key *k) {
+  struct Client *c;
   (void)k;
 
-  if (!sel || !clients)
+  if (!clients)
     return;
 
-  if (sel->next)
-    focus(sel->next);
-  else
-    focus(clients);
+  c = sel ? sel->next : clients;
+
+  for (; c && !ISVISIBLE(c); c = c->next)
+    ;
+
+  if (!c)
+    for (c = clients; c && !ISVISIBLE(c); c = c->next)
+      ;
+
+  if (!c)
+    return;
+
+  if (c && c != sel)
+    focus(c);
 }
 
 static void quit(const union Key *k) {
@@ -313,6 +368,7 @@ static void addclient(Window w) {
   c->win = w;
   c->next = clients;
   clients = c;
+  c->tags = tagset;
 
   XSetWindowBorderWidth(x.dpy, c->win, borderwidth);
   XSelectInput(x.dpy, w, EnterWindowMask | FocusChangeMask);
@@ -367,9 +423,19 @@ static void arrange(void) {
   if (!clients)
     return;
 
+  /* map/unmap based on visibility */
+  for (c = clients; c; c = c->next) {
+    if (ISVISIBLE(c))
+      XMapWindow(x.dpy, c->win);
+    else
+      XUnmapWindow(x.dpy, c->win);
+  }
+
+  /* count visible */
   n = 0;
   for (c = clients; c; c = c->next)
-    n++;
+    if (ISVISIBLE(c))
+      n++;
 
   if (!n)
     return;
@@ -377,7 +443,13 @@ static void arrange(void) {
   master_w = (n > 1) ? (dim.width * 3 / 5) : dim.width;
   stack_w = dim.width - master_w;
 
-  c = clients;
+  /* first visible = master */
+  for (c = clients; c && !ISVISIBLE(c); c = c->next)
+    ;
+
+  if (!c)
+    return;
+
   XMoveResizeWindow(x.dpy, c->win, 0, 0, master_w, dim.height);
 
   if (n == 1)
@@ -386,10 +458,15 @@ static void arrange(void) {
   stack_h = dim.height / (n - 1);
   i = 0;
 
-  for (c = c->next; c; c = c->next, i++) {
+  for (c = c->next; c; c = c->next) {
+    if (!ISVISIBLE(c))
+      continue;
+
     y = i * stack_h;
     h = (i == n - 2) ? (dim.height - y) : stack_h;
+
     XMoveResizeWindow(x.dpy, c->win, master_w, y, stack_w, h);
+    i++;
   }
 }
 
@@ -453,6 +530,14 @@ static void run(void) {
       }
     } break;
 
+    case ConfigureNotify: {
+      if (e.xconfigure.window == x.root) {
+        dim.width = e.xconfigure.width;
+        dim.height = e.xconfigure.height;
+        arrange();
+      }
+    } break;
+
     case DestroyNotify: {
       if (!getclient(e.xdestroywindow.window))
         break;
@@ -461,8 +546,12 @@ static void run(void) {
     } break;
 
     case UnmapNotify: {
+      if (e.xunmap.event == x.root)
+        break;
+
       if (!getclient(e.xunmap.window))
         break;
+
       removeclient(e.xunmap.window);
       arrange();
     } break;
