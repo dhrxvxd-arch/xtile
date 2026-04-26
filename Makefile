@@ -1,5 +1,6 @@
 PREFIX ?= /usr/local
 CC ?= cc
+BUILD ?= ./build
 
 CFLAGS ?= -std=c23 -Wall -Wextra -Wpedantic \
 	-Wno-deprecated-declarations \
@@ -14,10 +15,10 @@ OBJ = $(SRC:.c=.o)
 all: xtile
 
 xtile: $(OBJ)
-	$(CC) $(OBJ) -o $@ $(LDFLAGS)
+	$(CC) $(OBJ) -o $(BUILD)/$@ $(LDFLAGS)
 
 %.o: %.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) -c $< -o $(BUILD)/$@
 
 install: xtile
 	mkdir -p $(PREFIX)/bin
