@@ -182,9 +182,10 @@ static void setup(void) {
   XDefineCursor(x.dpy, x.root, x.cursor);
   dim.width = DisplayWidth(x.dpy, x.screen);
   dim.height = DisplayHeight(x.dpy, x.screen);
+
   for (size_t i = 0; i < LENGTH(keys); i++) {
-    keys[i].keycode = XKeysymToKeycode(x.dpy, keys[i].keysym);
-    XGrabKey(x.dpy, keys[i].keycode, keys[i].mod, x.root, True, GrabModeAsync,
+    KeyCode code = XKeysymToKeycode(x.dpy, keys[i].keysym);
+    XGrabKey(x.dpy, code, keys[i].mod, x.root, True, GrabModeAsync,
              GrabModeAsync);
   }
 }
