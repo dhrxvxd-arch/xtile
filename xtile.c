@@ -1,16 +1,25 @@
 #include <X11/X.h>
 #include <X11/Xlib.h>
 #include <X11/cursorfont.h>
+#include <X11/keysym.h>
+#include <errno.h>
 #include <locale.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include "config.h"
-#include "util.h"
+#include <unistd.h>
 
 #define VERSION "0.1.0"
+#define MODMASK Mod1Mask
+#define LENGTH(X) (sizeof(x) / sizeof((X)[0]))
+
+#if defined(__GNUC__) || defined(__clang__)
+#define PRINTF_FMT(a, b) __attribute__((format(printf, a, b)))
+#else
+#define PRINTF_FMT(a, b)
+#endif
 
 struct XContext {
   Display *dpy;
@@ -29,12 +38,31 @@ struct Dimensions {
   int height;
 };
 
+union Key {
+  int i;
+  unsigned int ui;
+  float f;
+  const void *v;
+};
+
+struct KeyGr {
+  unsigned int mod;
+  KeySym keysym;
+  void (*func)(const union Key *);
+  const union Key key;
+};
+
+static const unsigned short borderwidth = 2;
+static const char *termcmd[] = {"kitty", NULL};
+
 static struct XContext x;
 static struct Client *clients = NULL;
 static struct Client *sel = NULL;
 static struct Dimensions dim;
 static volatile sig_atomic_t running = 1;
 
+_Noreturn void die(const char *fmt, ...) PRINTF_FMT(1, 2);
+void *ecalloc(size_t nmemb, size_t size);
 static void initlocale(void);
 static void setup(void);
 static void run(void);
@@ -42,10 +70,90 @@ static void cleanup(void);
 static void checkconflicts(void);
 static void focus(struct Client *c);
 static void addclient(Window w);
+static void spawn(const union Key *key);
+static void killclient(const union Key *k);
+static void quit(const union Key *k);
+static void focusnext(const union Key *k);
 static void removeclient(Window w);
 static void arrange(void);
 static void scan(void);
 static struct Client *getclient(Window w);
+
+static const struct KeyGr keys[] = {
+    {MODMASK, XK_Return, spawn, {.v = termcmd}},
+    {Mod1Mask, XK_q, quit, {0}},
+    {Mod1Mask, XK_c, killclient, {0}},
+    {Mod1Mask, XK_j, focusnext, {0}},
+};
+
+_Noreturn void die(const char *fmt, ...) {
+  va_list ap;
+  int saved_errno;
+
+  saved_errno = errno;
+
+  va_start(ap, fmt);
+  vfprintf(stderr, fmt, ap);
+  va_end(ap);
+
+  size_t len = strlen(fmt);
+  if (len && fmt[len - 1] == ':')
+    fprintf(stderr, " %s", strerror(saved_errno));
+  fputc('\n', stderr);
+
+  fflush(stdout);
+  exit(EXIT_FAILURE);
+}
+
+void *ecalloc(size_t nmemb, size_t size) {
+  void *p;
+  if (!(p = calloc(nmemb, size)))
+    die("calloc:");
+  return p;
+}
+
+static void spawn(const union Key *key) {
+  struct sigaction sa;
+
+  pid_t pid = fork();
+  if (pid == 0) {
+    if (x.dpy)
+      close(ConnectionNumber(x.dpy));
+
+    setsid();
+
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sa.sa_handler = SIG_DFL;
+    sigaction(SIGCHLD, &sa, NULL);
+
+    execvp(((char **)key->v)[0], (char **)key->v);
+    die("xtile: execvp '%s', failed:", (((char **)key->v)[0]));
+  } else if (pid < 0) {
+    die("xtile: fork failed");
+  }
+}
+
+static void killclient(const union Key *k) {
+  (void)k;
+  if (!sel)
+    return;
+  XKillClient(x.dpy, sel->win);
+}
+
+static void focusnext(const union Key *k) {
+  (void)k;
+  if (!sel || !clients || !clients->next)
+    return;
+
+  struct Client *c = sel->next ? sel->next : clients;
+  focus(c);
+}
+
+static void quit(const union Key *k) {
+  (void)k;
+  running = 0;
+}
 
 static struct Client *getclient(Window w) {
   for (struct Client *c = clients; c; c = c->next)
@@ -81,6 +189,12 @@ static void setup(void) {
 
   dim.width = DisplayWidth(x.dpy, x.screen);
   dim.height = DisplayHeight(x.dpy, x.screen);
+
+  for (size_t i = 0; i < LENGTH(keys); i++) {
+    KeyCode code = XKeysymToKeycode(x.dpy, keys[i].keysym);
+    XGrabKey(x.dpy, code, keys[i].mod, x.root, True, GrabModeAsync,
+             GrabModeAsync);
+  }
 }
 
 static void checkconflicts(void) {
@@ -245,6 +359,23 @@ static void run(void) {
     case UnmapNotify: {
       removeclient(e.xunmap.window);
       arrange();
+    } break;
+
+    case KeyPress: {
+      XKeyEvent *ev = &e.xkey;
+
+      for (size_t i = 0; i < LENGTH(keys); i++) {
+        if (ev->keycode == XKeysymToKeycode(x.dpy, keys[i].keysym) &&
+            (ev->state & keys[i].mod))
+          keys[i].func(&keys[i].key);
+      }
+    } break;
+
+    case EnterNotify: {
+      XCrossingEvent *ev = &e.xcrossing;
+      struct Client *c = getclient(ev->window);
+      if (c && c != sel)
+        focus(c);
     } break;
 
     default:
