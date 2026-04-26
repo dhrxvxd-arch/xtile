@@ -62,6 +62,7 @@ static struct XContext x;
 static struct Client *clients;
 static struct Client *sel;
 static struct Dimensions dim;
+static struct KeyGr keys[];
 static volatile sig_atomic_t running = 1;
 
 _Noreturn void die(const char *fmt, ...) PRINTF_FMT(1, 2);
@@ -83,7 +84,7 @@ static void arrange(void);
 static void scan(void);
 static struct Client *getclient(Window w);
 
-static const struct KeyGr keys[] = {
+static struct KeyGr keys[] = {
     {MODMASK, XK_Return, 0, spawn, {.v = termcmd}},
     {MODMASK, XK_q, 0, quit, {0}},
     {MODMASK, XK_w, 0, killclient, {0}},
@@ -208,7 +209,7 @@ static void setup(void) {
   dim.height = DisplayHeight(x.dpy, x.screen);
 
   for (i = 0; i < LENGTH(keys); i++) {
-    code = XKeysymToKeycode(x.dpy, keys[i].keysym);
+    keys[i].keycode = XKeysymToKeycode(x.dpy, keys[i].keysym);
     XGrabKey(x.dpy, code, keys[i].mod, x.root, True, GrabModeAsync,
              GrabModeAsync);
   }
