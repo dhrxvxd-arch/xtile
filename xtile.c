@@ -53,12 +53,12 @@ union Key {
 struct KeyGr {
   unsigned int mod;
   KeySym keysym;
-  KeyCode keycode;
   void (*func)(const union Key *);
   const union Key key;
 };
 
 enum { SchemeNorm, SchemeSel };
+
 enum { CurNormal, CurResize, CurMove, CurLast };
 
 static const unsigned short borderwidth = 2;
@@ -103,10 +103,10 @@ static void scan(void);
 static struct Client *getclient(Window w);
 
 static struct KeyGr keys[] = {
-    {MODMASK, XK_Return, 0, spawn, {.v = termcmd}},
-    {MODMASK, XK_q, 0, quit, {0}},
-    {MODMASK, XK_w, 0, killclient, {0}},
-    {MODMASK, XK_j, 0, focusnext, {0}},
+    {MODMASK, XK_Return, spawn, {.v = termcmd}},
+    {MODMASK, XK_q, quit, {0}},
+    {MODMASK, XK_w, killclient, {0}},
+    {MODMASK, XK_j, focusnext, {0}},
 };
 
 _Noreturn void die(const char *fmt, ...) {
@@ -255,8 +255,8 @@ static void setup(void) {
   dim.height = DisplayHeight(x.dpy, x.screen);
 
   for (i = 0; i < LENGTH(keys); i++) {
-    keys[i].keycode = XKeysymToKeycode(x.dpy, keys[i].keysym);
-    XGrabKey(x.dpy, keys[i].keycode, keys[i].mod, x.root, True, GrabModeAsync,
+    KeyCode code = XKeysymToKeycode(x.dpy, keys[i].keysym);
+    XGrabKey(x.dpy, code, keys[i].mod, x.root, True, GrabModeAsync,
              GrabModeAsync);
   }
 
@@ -374,7 +374,7 @@ static void arrange(void) {
   if (!n)
     return;
 
-  master_w = (n > 1) ? (int)(dim.width * 0.6) : dim.width;
+  master_w = (n > 1) ? (dim.width * 3 / 5) : dim.width;
   stack_w = dim.width - master_w;
 
   c = clients;
@@ -469,8 +469,9 @@ static void run(void) {
 
     case KeyPress: {
       kev = &e.xkey;
+      KeySym sym = XLookupKeysym(kev, 0);
       for (i = 0; i < LENGTH(keys); i++) {
-        if (kev->keycode == keys[i].keycode &&
+        if (sym == keys[i].keysym &&
             CLEANMASK(kev->state) == CLEANMASK(keys[i].mod))
           keys[i].func(&keys[i].key);
       }
