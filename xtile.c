@@ -81,9 +81,9 @@ static struct Client *getclient(Window w);
 
 static const struct KeyGr keys[] = {
     {MODMASK, XK_Return, spawn, {.v = termcmd}},
-    {Mod1Mask, XK_q, quit, {0}},
-    {Mod1Mask, XK_c, killclient, {0}},
-    {Mod1Mask, XK_j, focusnext, {0}},
+    {MODMASK, XK_q, quit, {0}},
+    {MODMASK, XK_w, killclient, {0}},
+    {MODMASK, XK_j, focusnext, {0}},
 };
 
 _Noreturn void die(const char *fmt, ...) {
@@ -274,20 +274,35 @@ static void removeclient(Window w) {
 }
 
 static void arrange(void) {
+  if (!clients)
+    return;
+
   int n = 0;
   for (struct Client *c = clients; c; c = c->next)
     n++;
 
-  if (!n)
+  if (n == 0)
+    return;
+
+  int master_w = (n > 1) ? (dim.width * 0.6) : dim.width;
+  int stack_w = dim.width - master_w;
+
+  struct Client *c = clients;
+
+  XMoveResizeWindow(x.dpy, c->win, 0, 0, master_w, dim.height);
+
+  if (n == 1)
     return;
 
   int i = 0;
-  for (struct Client *c = clients; c; c = c->next) {
-    int wx = (i % 2) * (dim.width / 2);
-    int wy = (i / 2) * (dim.height / (n / 2 + 1));
+  int stack_h = dim.height / (n - 1);
 
-    XMoveResizeWindow(x.dpy, c->win, wx, wy, dim.width / 2,
-                      dim.height / (n / 2 + 1));
+  for (c = c->next; c; c = c->next) {
+    int y = i * stack_h;
+
+    int h = (i == n - 2) ? (dim.height - y) : stack_h;
+
+    XMoveResizeWindow(x.dpy, c->win, master_w, y, stack_w, h);
     i++;
   }
 }
