@@ -197,7 +197,6 @@ static int xerrorstart(Display *dpy, XErrorEvent *ee) {
 
 static void setup(void) {
   size_t i;
-  KeyCode code;
 
   x.screen = DefaultScreen(x.dpy);
   x.root = RootWindow(x.dpy, x.screen);
@@ -209,7 +208,7 @@ static void setup(void) {
 
   for (i = 0; i < LENGTH(keys); i++) {
     keys[i].keycode = XKeysymToKeycode(x.dpy, keys[i].keysym);
-    XGrabKey(x.dpy, code, keys[i].mod, x.root, True, GrabModeAsync,
+    XGrabKey(x.dpy, keys[i].keycode, keys[i].mod, x.root, True, GrabModeAsync,
              GrabModeAsync);
   }
 }
