@@ -64,11 +64,6 @@ struct KeyGr {
 enum { SchemeNorm, SchemeSel };
 enum { CurNormal, CurResize, CurMove, CurLast };
 
-static const unsigned short borderwidth = 2;
-static unsigned long scheme[2][3];
-static const char *termcmd[] = {"st", NULL};
-static const char *dmenucmd[] = {"dmenu_run", "-show", "run", NULL};
-
 static const char col_1[] = "#222222";
 static const char col_2[] = "#444444";
 static const char col_3[] = "#bbbbbb";
@@ -79,6 +74,11 @@ static const char *colors[][3] = {
     [SchemeNorm] = {col_3, col_1, col_2},
     [SchemeSel] = {col_4, col_accent, col_accent},
 };
+
+static const unsigned short borderwidth = 2;
+static unsigned long scheme[2][3];
+static const char *termcmd[] = {"st", NULL};
+static const char *dmenucmd[] = {"dmenu_run", "-show", "run", NULL};
 
 static struct XContext x;
 static struct Client *clients;
