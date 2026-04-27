@@ -119,17 +119,17 @@ static void tag(const union Key *k);
 static struct Client *getclient(Window w);
 
 static struct KeyGr keys[] = {
-    {MODMASK, 			XK_Return, 	spawn, 		{.v = termcmd}},
-    {MODMASK, 			XK_space,  	spawn, 		{.v = roficmd}},
-    {MODMASK, 			XK_q, 		quit, 		{0}},
-    {MODMASK, 			XK_w, 		killclient, 	{0}},
-    {MODMASK, 			XK_j, 		focusnext, 	{0}},
-    {MODMASK, 			XK_1, 		view, 		{.ui = 1 << 0}},
-    {MODMASK, 			XK_2, 		view, 		{.ui = 1 << 1}},
-    {MODMASK, 			XK_3, 		view, 		{.ui = 1 << 2}},
-    {MODMASK|ShiftMask, 	XK_1, 		tag, 		{.ui = 1 << 0}},
-    {MODMASK|ShiftMask, 	XK_2, 		tag, 		{.ui = 1 << 1}},
-    {MODMASK|ShiftMask, 	XK_3, 		tag, 		{.ui = 1 << 2}},
+    {MODMASK, XK_Return, spawn, {.v = termcmd}},
+    {MODMASK, XK_space, spawn, {.v = roficmd}},
+    {MODMASK, XK_q, quit, {0}},
+    {MODMASK, XK_w, killclient, {0}},
+    {MODMASK, XK_j, focusnext, {0}},
+    {MODMASK, XK_1, view, {.ui = 1 << 0}},
+    {MODMASK, XK_2, view, {.ui = 1 << 1}},
+    {MODMASK, XK_3, view, {.ui = 1 << 2}},
+    {MODMASK | ShiftMask, XK_1, tag, {.ui = 1 << 0}},
+    {MODMASK | ShiftMask, XK_2, tag, {.ui = 1 << 1}},
+    {MODMASK | ShiftMask, XK_3, tag, {.ui = 1 << 2}},
 };
 
 static void view(const union Key *k) {
