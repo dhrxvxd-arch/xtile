@@ -99,6 +99,22 @@ static const struct Layout layouts[] = {
     {"[M]", monocle},
 };
 
+static void updatenumlockmask(void) {
+  XModifierKeymap *modmap;
+  KeyCode numlock;
+  numlockmask = 0;
+
+  modmap = XGetModifierMapping(x.dpy);
+  numlock = XKeysymToKeycode(x.dpy, XK_Num_Lock);
+
+  for (int i = 0; i < 8; i++)
+    for (int j = 0; j < modmap->max_keypermod; j++)
+      if (modmap->modifiermap[i * modmap->max_keypermod + j] == numlock)
+        numlockmask = (1 << i);
+
+  XFreeModifiermap(modmap);
+}
+
 static void focus(struct Client *c) {
   if (sel && sel != c)
     XSetWindowBorder(x.dpy, sel->win, scheme[0][2]);
@@ -121,10 +137,9 @@ static void restack(void) {
 
   XRaiseWindow(x.dpy, sel->win);
 
-  for (struct Client *c = clients; c; c = c->next) {
+  for (struct Client *c = clients; c; c = c->next)
     if (c != sel && ISVISIBLE(c))
       XLowerWindow(x.dpy, c->win);
-  }
 }
 
 static void tile(void) {
@@ -198,6 +213,7 @@ static void setmfact(const union Key *k) {
 }
 
 static void nextlayout(const union Key *k) {
+  (void)k;
   layout_idx = (layout_idx + 1) % LENGTH(layouts);
   arrange();
 }
@@ -213,6 +229,8 @@ static void spawn(const union Key *key) {
 }
 
 static void killclient(const union Key *k) {
+  (void)k;
+
   if (!sel)
     return;
 
@@ -225,9 +243,8 @@ static void killclient(const union Key *k) {
     ev.xclient.data.l[0] = wm_delete;
     ev.xclient.data.l[1] = CurrentTime;
     XSendEvent(x.dpy, sel->win, False, NoEventMask, &ev);
-  } else {
+  } else
     XKillClient(x.dpy, sel->win);
-  }
 }
 
 static struct Client *getclient(Window w) {
@@ -280,6 +297,8 @@ static unsigned long getcolor(const char *col) {
 static void setup(void) {
   x.screen = DefaultScreen(x.dpy);
   x.root = RootWindow(x.dpy, x.screen);
+
+  updatenumlockmask();
 
   dim.width = DisplayWidth(x.dpy, x.screen);
   dim.height = DisplayHeight(x.dpy, x.screen);
