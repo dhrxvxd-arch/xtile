@@ -5,13 +5,10 @@
 #include <X11/cursorfont.h>
 #include <X11/keysym.h>
 
-#include <errno.h>
 #include <locale.h>
 #include <signal.h>
 #include <stdarg.h>
-#include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
 
 #define VERSION "0.1.0"
@@ -22,11 +19,6 @@
    (ShiftMask | ControlMask | Mod1Mask | Mod2Mask | Mod3Mask | Mod4Mask |      \
     Mod5Mask))
 #define ISVISIBLE(C) (C->tags & tagset)
-#if defined(__GNUC__) || defined(__clang__)
-#define PRINTF_FMT(a, b) __attribute__((format(printf, a, b)))
-#else
-#define PRINTF_FMT(a, b)
-#endif
 
 struct XContext {
   Display *dpy;
@@ -61,8 +53,10 @@ struct KeyGr {
   const union Key key;
 };
 
-enum { SchemeNorm, SchemeSel };
-enum { CurNormal, CurResize, CurMove, CurLast };
+struct Layout {
+  const char *symbol;
+  void (*layout)(void);
+};
 
 static const char col_1[] = "#222222";
 static const char col_2[] = "#444444";
@@ -71,14 +65,13 @@ static const char col_4[] = "#eeeeee";
 static const char col_accent[] = "#005577";
 
 static const char *colors[][3] = {
-    [SchemeNorm] = {col_3, col_1, col_2},
-    [SchemeSel] = {col_4, col_accent, col_accent},
+    {col_3, col_1, col_2},
+    {col_4, col_accent, col_accent},
 };
 
-static const unsigned short borderwidth = 2;
-static unsigned long scheme[2][3];
+static const unsigned short borderpx = 2;
+static const char font[] = "monospace:size=10";
 static const char *termcmd[] = {"st", NULL};
-static const char *dmenucmd[] = {"dmenu_run", "-show", "run", NULL};
 
 static struct XContext x;
 static struct Client *clients;
@@ -87,201 +80,142 @@ static struct Dimensions dim;
 static unsigned int numlockmask;
 static volatile sig_atomic_t running = 1;
 static unsigned int tagset = 1;
+static unsigned long scheme[2][3];
 
 static Atom wm_delete;
 static Atom wm_protocols;
 static Atom wm_state;
-static Atom wm_take_focus;
-static Atom wm_normal;
 
-_Noreturn void die(const char *fmt, ...) PRINTF_FMT(1, 2);
-void *ecalloc(size_t nmemb, size_t size);
+static float mfact = 0.6;
+static int layout_idx = 0;
 
-static void initlocale(void);
-static void setup(void);
-static void run(void);
-static void cleanup(void);
-static void checkconflicts(void);
-static void focus(struct Client *c);
-static void addclient(Window w);
-static void spawn(const union Key *key);
-static void killclient(const union Key *k);
-static void setwmstate(Window w, long state);
-static unsigned long getcolor(const char *col);
-static void updatenumlockmask(void);
-static void quit(const union Key *k);
-static void focusnext(const union Key *k);
-static void removeclient(Window w);
 static void arrange(void);
-static void scan(void);
-static void view(const union Key *k);
-static void tag(const union Key *k);
-static struct Client *getclient(Window w);
+static void tile(void);
+static void monocle(void);
 
-static struct KeyGr keys[] = {
-    {MODMASK, XK_Return, spawn, {.v = termcmd}},
-    {MODMASK, XK_space, spawn, {.v = dmenucmd}},
-    {MODMASK, XK_q, quit, {0}},
-    {MODMASK, XK_w, killclient, {0}},
-    {MODMASK, XK_j, focusnext, {0}},
-    {MODMASK, XK_1, view, {.ui = 1 << 0}},
-    {MODMASK, XK_2, view, {.ui = 1 << 1}},
-    {MODMASK, XK_3, view, {.ui = 1 << 2}},
-    {MODMASK, XK_4, view, {.ui = 1 << 3}},
-    {MODMASK, XK_5, view, {.ui = 1 << 4}},
-    {MODMASK, XK_6, view, {.ui = 1 << 5}},
-    {MODMASK, XK_7, view, {.ui = 1 << 6}},
-    {MODMASK, XK_8, view, {.ui = 1 << 7}},
-    {MODMASK, XK_9, view, {.ui = 1 << 8}},
-    {MODMASK | ShiftMask, XK_1, tag, {.ui = 1 << 0}},
-    {MODMASK | ShiftMask, XK_2, tag, {.ui = 1 << 1}},
-    {MODMASK | ShiftMask, XK_3, tag, {.ui = 1 << 2}},
-    {MODMASK | ShiftMask, XK_4, tag, {.ui = 1 << 3}},
-    {MODMASK | ShiftMask, XK_5, tag, {.ui = 1 << 4}},
-    {MODMASK | ShiftMask, XK_6, tag, {.ui = 1 << 5}},
-    {MODMASK | ShiftMask, XK_7, tag, {.ui = 1 << 6}},
-    {MODMASK | ShiftMask, XK_8, tag, {.ui = 1 << 7}},
-    {MODMASK | ShiftMask, XK_9, tag, {.ui = 1 << 8}},
+static const struct Layout layouts[] = {
+    {"[]=", tile},
+    {"><>", NULL},
+    {"[M]", monocle},
 };
 
-static void view(const union Key *k) {
-  if (tagset == k->ui)
-    return;
-  tagset = k->ui;
-  arrange();
-  sel = NULL;
-  for (struct Client *c = clients; c; c = c->next) {
-    if (ISVISIBLE(c)) {
-      focus(c);
-      break;
-    }
-  }
-}
-
-static void tag(const union Key *k) {
-  if (!sel)
-    return;
-  sel->tags = k->ui;
-  arrange();
-  sel = NULL;
-  for (struct Client *c = clients; c; c = c->next) {
-    if (ISVISIBLE(c)) {
-      focus(c);
-      break;
-    }
-  }
-}
-
-_Noreturn void die(const char *fmt, ...) {
-  va_list ap;
-  int saved_errno = errno;
-
-  va_start(ap, fmt);
-  vfprintf(stderr, fmt, ap);
-  va_end(ap);
-
-  if (fmt[0] && fmt[strlen(fmt) - 1] == ':')
-    fprintf(stderr, " %s", strerror(saved_errno));
-
-  fputc('\n', stderr);
-  exit(EXIT_FAILURE);
-}
-
-void *ecalloc(size_t nmemb, size_t size) {
-  void *p = calloc(nmemb, size);
-  if (!p)
-    die("calloc failed");
-  return p;
-}
-
-static unsigned long getcolor(const char *col) {
-  XColor c;
-  Colormap cmap = DefaultColormap(x.dpy, x.screen);
-  if (!XAllocNamedColor(x.dpy, cmap, col, &c, &c))
-    die("color alloc failed");
-  return c.pixel;
-}
-
-static void updatenumlockmask(void) {
-  XModifierKeymap *modmap = XGetModifierMapping(x.dpy);
-  KeyCode numlock = XKeysymToKeycode(x.dpy, XK_Num_Lock);
-  numlockmask = 0;
-  for (int i = 0; i < 8; i++) {
-    for (int j = 0; j < modmap->max_keypermod; j++) {
-      if (modmap->modifiermap[i * modmap->max_keypermod + j] == numlock)
-        numlockmask = (1 << i);
-    }
-  }
-  XFreeModifiermap(modmap);
-}
-
-static void spawn(const union Key *key) {
-  pid_t pid = fork();
-  if (pid == 0) {
-    if (x.dpy)
-      close(ConnectionNumber(x.dpy));
-    setsid();
-    char **argv = (char **)key->v;
-    execvp(argv[0], argv);
-    _exit(EXIT_FAILURE);
-  }
-}
-
-static void setwmstate(Window w, long state) {
-  long data[2] = {state, None};
-  XChangeProperty(x.dpy, w, wm_state, wm_state, 32, PropModeReplace,
-                  (unsigned char *)data, 2);
-}
-
 static void focus(struct Client *c) {
+  if (sel && sel != c)
+    XSetWindowBorder(x.dpy, sel->win, scheme[0][2]);
+
   if (!c) {
     sel = NULL;
     XSetInputFocus(x.dpy, x.root, RevertToPointerRoot, CurrentTime);
     return;
   }
+
   sel = c;
   XSetInputFocus(x.dpy, c->win, RevertToPointerRoot, CurrentTime);
   XRaiseWindow(x.dpy, c->win);
+  XSetWindowBorder(x.dpy, c->win, scheme[1][2]);
 }
 
-static struct Client *getclient(Window w) {
-  for (struct Client *c = clients; c; c = c->next)
-    if (c->win == w)
-      return c;
-  return NULL;
+static void restack(void) {
+  if (!sel)
+    return;
+
+  XRaiseWindow(x.dpy, sel->win);
+
+  for (struct Client *c = clients; c; c = c->next) {
+    if (c != sel && ISVISIBLE(c))
+      XLowerWindow(x.dpy, c->win);
+  }
 }
 
-static void addclient(Window w) {
-  struct Client *c = ecalloc(1, sizeof(*c));
-  c->win = w;
-  c->tags = tagset;
-  c->next = clients;
-  clients = c;
+static void tile(void) {
+  struct Client *c;
+  int n = 0;
 
-  XSetWindowBorderWidth(x.dpy, w, borderwidth);
-  XSelectInput(x.dpy, w,
-               EnterWindowMask | FocusChangeMask | StructureNotifyMask);
-  XSetWindowBorder(x.dpy, w, scheme[SchemeNorm][2]);
+  for (c = clients; c; c = c->next)
+    if (ISVISIBLE(c))
+      n++;
+    else
+      XUnmapWindow(x.dpy, c->win);
 
-  Atom *protos = NULL;
-  int n;
-  if (XGetWMProtocols(x.dpy, w, &protos, &n)) {
-    for (int i = 0; i < n; i++) {
-      if (protos[i] == wm_delete)
-        c->can_delete = 1;
+  if (n == 0)
+    return;
+
+  int mw = (n > 1) ? dim.width * mfact : dim.width;
+  int sw = dim.width - mw;
+
+  int i = 0;
+  int sh = (n > 1) ? dim.height / (n - 1) : 0;
+
+  for (c = clients; c; c = c->next) {
+    if (!ISVISIBLE(c))
+      continue;
+
+    XMapWindow(x.dpy, c->win);
+
+    if (i == 0) {
+      XMoveResizeWindow(x.dpy, c->win, 0, 0, mw - 2 * borderpx,
+                        dim.height - 2 * borderpx);
+    } else {
+      int y = (i - 1) * sh;
+      int h = (i == n - 1) ? dim.height - y : sh;
+
+      XMoveResizeWindow(x.dpy, c->win, mw, y, sw - 2 * borderpx,
+                        h - 2 * borderpx);
     }
-    XFree(protos);
+    i++;
   }
 
-  XSetWMProtocols(x.dpy, w, &wm_delete, 1);
-  XSetWMProtocols(x.dpy, w, &wm_take_focus, 1);
-  setwmstate(w, NormalState);
+  restack();
+}
+
+static void monocle(void) {
+  for (struct Client *c = clients; c; c = c->next) {
+    if (!ISVISIBLE(c)) {
+      XUnmapWindow(x.dpy, c->win);
+      continue;
+    }
+
+    XMapWindow(x.dpy, c->win);
+    XMoveResizeWindow(x.dpy, c->win, 0, 0, dim.width - 2 * borderpx,
+                      dim.height - 2 * borderpx);
+  }
+
+  restack();
+}
+
+static void arrange(void) {
+  if (!layouts[layout_idx].layout)
+    return;
+  layouts[layout_idx].layout();
+}
+
+static void setmfact(const union Key *k) {
+  float f = mfact + k->f;
+  if (f < 0.1 || f > 0.9)
+    return;
+  mfact = f;
+  arrange();
+}
+
+static void nextlayout(const union Key *k) {
+  layout_idx = (layout_idx + 1) % LENGTH(layouts);
+  arrange();
+}
+
+static void spawn(const union Key *key) {
+  if (fork() == 0) {
+    if (x.dpy)
+      close(ConnectionNumber(x.dpy));
+    setsid();
+    execvp(((char **)key->v)[0], (char **)key->v);
+    _exit(1);
+  }
 }
 
 static void killclient(const union Key *k) {
-  (void)k;
   if (!sel)
     return;
+
   if (sel->can_delete) {
     XEvent ev = {0};
     ev.type = ClientMessage;
@@ -296,23 +230,31 @@ static void killclient(const union Key *k) {
   }
 }
 
-static void focusnext(const union Key *k) {
-  (void)k;
-  if (!clients)
-    return;
-  struct Client *c = sel ? sel->next : clients;
-  for (; c && !ISVISIBLE(c); c = c->next)
-    ;
-  if (!c)
-    for (c = clients; c && !ISVISIBLE(c); c = c->next)
-      ;
-  if (c)
-    focus(c);
+static struct Client *getclient(Window w) {
+  for (struct Client *c = clients; c; c = c->next)
+    if (c->win == w)
+      return c;
+  return NULL;
 }
 
-static void quit(const union Key *k) {
-  (void)k;
-  running = 0;
+static void addclient(Window w) {
+  struct Client *c = calloc(1, sizeof(*c));
+  c->win = w;
+  c->tags = tagset;
+  c->next = clients;
+  clients = c;
+
+  XSetWindowBorderWidth(x.dpy, w, borderpx);
+  XSetWindowBorder(x.dpy, w, scheme[0][2]);
+
+  Atom *protos;
+  int n;
+  if (XGetWMProtocols(x.dpy, w, &protos, &n)) {
+    for (int i = 0; i < n; i++)
+      if (protos[i] == wm_delete)
+        c->can_delete = 1;
+    XFree(protos);
+  }
 }
 
 static void removeclient(Window w) {
@@ -321,115 +263,44 @@ static void removeclient(Window w) {
     if ((*tc)->win == w) {
       struct Client *t = *tc;
       *tc = t->next;
-      if (sel == t)
-        sel = clients;
       free(t);
       break;
     }
     tc = &(*tc)->next;
   }
-  if (sel)
-    focus(sel);
-  else
-    XSetInputFocus(x.dpy, x.root, RevertToPointerRoot, CurrentTime);
 }
 
-static void arrange(void) {
-  int n = 0;
-  for (struct Client *c = clients; c; c = c->next)
-    if (ISVISIBLE(c))
-      n++;
-  if (!n)
-    return;
-
-  int mw = (n > 1) ? dim.width * 3 / 5 : dim.width;
-  int sw = dim.width - mw;
-
-  struct Client *c = clients;
-  while (c && !ISVISIBLE(c))
-    c = c->next;
-  if (!c)
-    return;
-
-  XMoveResizeWindow(x.dpy, c->win, 0, 0, mw, dim.height);
-
-  int i = 0;
-  int sh = dim.height / (n - 1);
-
-  for (c = c->next; c; c = c->next) {
-    if (!ISVISIBLE(c))
-      continue;
-    int y = i * sh;
-    int h = (i == n - 2) ? (dim.height - y) : sh;
-    XMoveResizeWindow(x.dpy, c->win, mw, y, sw, h);
-    i++;
-  }
-}
-
-static void scan(void) {
-  Window r, p, *wins;
-  unsigned int n;
-  XWindowAttributes wa;
-
-  if (XQueryTree(x.dpy, x.root, &r, &p, &wins, &n)) {
-    for (unsigned int i = 0; i < n; i++) {
-      if (!XGetWindowAttributes(x.dpy, wins[i], &wa) || wa.override_redirect ||
-          wa.map_state != IsViewable)
-        continue;
-      if (!getclient(wins[i]))
-        addclient(wins[i]);
-    }
-    if (wins)
-      XFree(wins);
-  }
-}
-
-static void checkconflicts(void) {
-  XSetErrorHandler(NULL);
-  XSelectInput(x.dpy, x.root,
-               SubstructureRedirectMask | SubstructureNotifyMask |
-                   ButtonPressMask | PointerMotionMask | StructureNotifyMask);
-  XSync(x.dpy, False);
-}
-
-static void initlocale(void) {
-  setlocale(LC_CTYPE, "");
-  XSupportsLocale();
-  XSetLocaleModifiers("");
+static unsigned long getcolor(const char *col) {
+  XColor c;
+  Colormap cmap = DefaultColormap(x.dpy, x.screen);
+  XAllocNamedColor(x.dpy, cmap, col, &c, &c);
+  return c.pixel;
 }
 
 static void setup(void) {
   x.screen = DefaultScreen(x.dpy);
   x.root = RootWindow(x.dpy, x.screen);
-  x.cursor = XCreateFontCursor(x.dpy, XC_left_ptr);
-  XDefineCursor(x.dpy, x.root, x.cursor);
 
   dim.width = DisplayWidth(x.dpy, x.screen);
   dim.height = DisplayHeight(x.dpy, x.screen);
 
-  for (size_t i = 0; i < LENGTH(keys); i++) {
-    KeyCode code = XKeysymToKeycode(x.dpy, keys[i].keysym);
-    XGrabKey(x.dpy, code, keys[i].mod, x.root, True, GrabModeAsync,
-             GrabModeAsync);
-  }
+  for (int i = 0; i < 2; i++)
+    for (int j = 0; j < 3; j++)
+      scheme[i][j] = getcolor(colors[i][j]);
 
   wm_delete = XInternAtom(x.dpy, "WM_DELETE_WINDOW", False);
   wm_protocols = XInternAtom(x.dpy, "WM_PROTOCOLS", False);
   wm_state = XInternAtom(x.dpy, "WM_STATE", False);
-  wm_take_focus = XInternAtom(x.dpy, "WM_TAKE_FOCUS", False);
-  wm_normal = XInternAtom(x.dpy, "NormalState", False);
 
-  updatenumlockmask();
-
-  for (size_t i = 0; i < LENGTH(colors); i++)
-    for (size_t j = 0; j < 3; j++)
-      scheme[i][j] = getcolor(colors[i][j]);
+  XSelectInput(x.dpy, x.root,
+               SubstructureRedirectMask | SubstructureNotifyMask);
 }
 
 static void run(void) {
   XEvent e;
   while (running) {
     XNextEvent(x.dpy, &e);
+
     if (e.type == MapRequest) {
       Window w = e.xmaprequest.window;
       if (!getclient(w))
@@ -437,70 +308,42 @@ static void run(void) {
       XMapWindow(x.dpy, w);
       focus(getclient(w));
       arrange();
-      setwmstate(w, NormalState);
-    } else if (e.type == ConfigureNotify) {
-      if (e.xconfigure.window == x.root) {
-        dim.width = e.xconfigure.width;
-        dim.height = e.xconfigure.height;
-        arrange();
-      }
     } else if (e.type == DestroyNotify) {
       removeclient(e.xdestroywindow.window);
       arrange();
-    } else if (e.type == UnmapNotify) {
-      if (!getclient(e.xunmap.window))
-        continue;
-      removeclient(e.xunmap.window);
+    } else if (e.type == ConfigureNotify) {
+      dim.width = e.xconfigure.width;
+      dim.height = e.xconfigure.height;
       arrange();
     } else if (e.type == KeyPress) {
-      XKeyEvent *ke = &e.xkey;
-      KeySym sym = XLookupKeysym(ke, 0);
-      for (size_t i = 0; i < LENGTH(keys); i++) {
-        if (sym == keys[i].keysym &&
-            CLEANMASK(ke->state) == CLEANMASK(keys[i].mod))
-          keys[i].func(&keys[i].key);
-      }
-    } else if (e.type == EnterNotify) {
-      struct Client *c = getclient(e.xcrossing.window);
-      if (c)
-        focus(c);
+      KeySym sym = XLookupKeysym(&e.xkey, 0);
+
+      if (sym == XK_Return)
+        spawn(&(union Key){.v = termcmd});
+      else if (sym == XK_q)
+        running = 0;
+      else if (sym == XK_Tab)
+        nextlayout(NULL);
+      else if (sym == XK_h)
+        setmfact(&(union Key){.f = -0.05});
+      else if (sym == XK_l)
+        setmfact(&(union Key){.f = 0.05});
+      else if (sym == XK_w)
+        killclient(NULL);
     }
   }
 }
 
-static void cleanup(void) {
-  if (x.dpy) {
-    if (x.cursor)
-      XFreeCursor(x.dpy, x.cursor);
-    XCloseDisplay(x.dpy);
-  }
-}
-
-int main(int argc, char **argv) {
-  if (argc == 2 && !strcmp(argv[1], "-v")) {
-    puts("xtile-" VERSION);
-    return 0;
-  }
-
-  signal(SIGINT, SIG_DFL);
-  signal(SIGTERM, SIG_DFL);
-
-  initlocale();
+int main(void) {
+  setlocale(LC_CTYPE, "");
 
   x.dpy = XOpenDisplay(NULL);
   if (!x.dpy)
-    die("cannot open display");
+    exit(1);
 
   setup();
-  checkconflicts();
-  scan();
-
-  if (clients)
-    focus(clients);
-
-  arrange();
   run();
-  cleanup();
 
-  return EXIT_SUCCESS;
+  XCloseDisplay(x.dpy);
+  return 0;
 }
